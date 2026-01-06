@@ -1,0 +1,1357 @@
+# ============================================================
+# CYD Music Controller for ESPHome
+# ============================================================
+# Required: secrets.yaml
+# - wifi_ssid
+# - wifi_password
+# - api_key
+# - ota_password
+#
+# Required fonts:
+# - "fonts/NotoSans_Condensed-Light.ttf"
+# - "fonts/materialdesignicons-webfont.ttf"
+#
+# Required includes:
+# - "includes/clean_unicode.h"
+# - "includes/playlist_handler.h"
+#
+# Required for playlist functionality in Home Assistant:
+# - input_select.music_playlists
+# - automation.play_selected_music_assistant_playlist
+# - automation.sync_music_assistant_playlists_to_input_select
+#
+# Required for Favorites:
+# - input_boolean.current_track_is_favorite
+# - automation.update_current_track_favorite_status
+# ============================================================
+
+substitutions:
+  # This device's name
+  device_name: bragi
+  device_friendly_name: bragi
+
+  # Default Colors
+  # Can be overridden from the Home Assistant Device's UI
+  color_foreground: 0xFFD700
+  color_foreground_dimmed: 0x666666
+  color_background: 0x000000
+  color_background_btn: 0x222222
+  color_background_btn_pressed: 0x444444
+  color_border: 0x555555
+  color_foreground_status: 0xAAAAAA
+
+  # Media Player Name
+  # media_player.<speaker name>
+  media_player_entity: 
+
+  # Media Player Name in Home Assistant from the Music Assistant Integration
+  # media_player.<speaker name>
+  media_player_entity_mass: media_player.<speaker name>
+
+  # Media Player Device Id
+  # Home Assistant > Devices and Entities > Entites > Search for Media Player
+  # - Click the Media Player from the Music Assistant Integration
+  # - Click the 3 dots on the top right of the popup
+  # - Click "Device info"
+  # - From the URL copy the last segment from the URL after /config/devices/device/
+  media_player_device: 
+
+  # Entity used to favorite the current song
+  # - Home Assistant > Devices and Entities > Entites > Search for Media Player
+  # - Click Favorite current song
+  # - Click the Gear
+  # - Copy the Entity Id:
+  # button.<speaker name>_favorite_current_song
+  entity_button_favorite: 
+
+  # Home Assistant Area
+  area_id: 
+  area_name: ""
+
+# ============================================================
+
+esphome:
+  compile_process_limit: 1
+  name: ${device_name}
+  friendly_name: ${device_friendly_name}
+  name_add_mac_suffix: false
+  area:
+    id: ${area_id}
+    name: ${area_name}
+  includes:
+    - includes/clean_unicode.h
+    - includes/playlist_handler.h
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+    # Enable when using CYD with PSRAM for album art support
+    # sdkconfig_options:
+    #   CONFIG_ESP32_SPIRAM_SUPPORT: y
+
+# Uncomment when using CYD with PSRAM
+# psram:
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  on_connect:
+    then:
+      - lambda: |-
+          ESP_LOGI("wifi", "Connected to WiFi");
+          id(wifi_connected) = true;
+      - lvgl.label.update:
+          id: status_label
+          text: "WiFi Connected"
+      - delay: 2s
+      - lvgl.label.update:
+          id: status_label
+          text: "Connecting to Home Assistant..."
+  on_disconnect:
+    then:
+      - lambda: |-
+          ESP_LOGW("wifi", "Disconnected from WiFi");
+          id(wifi_connected) = false;
+      - lvgl.label.update:
+          id: status_label
+          text: "WiFi Disconnected"
+      - delay: 2s
+      - lvgl.label.update:
+          id: status_label
+          text: "Attempting to reconnect..."
+
+logger:
+
+api:
+  encryption:
+    key: !secret api_key
+  on_client_connected:
+    then:
+      - lambda: |-
+          ESP_LOGI("api", "Connected to Home Assistant");
+          id(ha_connected) = true;
+      - lvgl.label.update:
+          id: status_label
+          text: "Home Assistant Connected"
+      - delay: 2s
+      - lvgl.label.update:
+          id: status_label
+          text: "Syncing media player data..."
+  on_client_disconnected:
+    then:
+      - lambda: |-
+          ESP_LOGW("api", "Disconnected from Home Assistant");
+          id(ha_connected) = false;
+      - lvgl.label.update:
+          id: status_label
+          text: "Home Assistant Disconnected"
+      - delay: 2s
+      - lvgl.label.update:
+          id: status_label
+          text: "Waiting to reconnect..."
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+time:
+  - platform: homeassistant
+    id: ha_time
+
+# =========================
+# HTTP Request (required for online_image)
+# =========================
+http_request:
+  timeout: 10s
+  verify_ssl: False
+
+# =========================
+# SPI for Display
+# =========================
+spi:
+  - id: tft
+    clk_pin: 14
+    mosi_pin: 13
+    miso_pin:
+      number: 12
+      ignore_strapping_warning: true
+  - id: touch_spi
+    clk_pin: 25
+    mosi_pin: 32
+    miso_pin: 39
+
+# =========================
+# Display
+# =========================
+display:
+  - platform: ili9xxx
+    model: ili9341
+    spi_id: tft
+    cs_pin:
+      number: 15
+      ignore_strapping_warning: true
+    dc_pin:
+      number: 2
+      ignore_strapping_warning: true
+    reset_pin: 4
+    rotation: 90
+    invert_colors: false
+    id: tft_display
+
+# =========================
+# Touchscreen
+# =========================
+touchscreen:
+  - platform: xpt2046
+    id: main_touchscreen
+    spi_id: touch_spi
+    cs_pin: 33
+    interrupt_pin: 36
+    threshold: 400
+    calibration:
+      x_min: 180
+      x_max: 3800
+      y_min: 240
+      y_max: 3860
+    transform:
+      swap_xy: true
+    on_touch:
+      then:
+        # Reset activity timer
+        - lambda: |-
+            id(last_activity) = millis();
+            // Store touch X position for seeking
+            id(seek_position) = touch.x;
+        - if:
+            condition:
+              lambda: 'return !id(backlight).current_values.is_on();'
+            then:
+              - light.turn_on: backlight
+
+# =========================
+# Global Vars
+# =========================
+globals:
+  - id: last_activity
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+
+  - id: local_position
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+  - id: last_ha_position
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+  - id: is_playing
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+  - id: wifi_connected
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+  - id: ha_connected
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+  - id: seek_position
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+  - id: is_shuffled
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+  - id: is_favorited
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+  # Color values for dynamic theme
+  - id: current_fg_color
+    type: uint32_t
+    restore_value: no
+    initial_value: '0xFFD700'
+
+  - id: current_fg_dimmed
+    type: uint32_t
+    restore_value: no
+    initial_value: '0x666666'
+
+  - id: current_border_color
+    type: uint32_t
+    restore_value: no
+    initial_value: '0xB2B2B2'
+
+  # Rainbow animation state
+  - id: rainbow_enabled
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+  - id: rainbow_hue
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+# =========================
+# Backlight (PWM)
+# =========================
+output:
+  - platform: ledc
+    pin: GPIO21
+    id: backlight_pwm
+
+#
+# Configuration items from within Home Assistant
+#
+
+light:
+  - platform: monochromatic
+    output: backlight_pwm
+    name: "Backlight"
+    id: backlight
+    restore_mode: ALWAYS_ON
+    default_transition_length: 1s
+
+text:
+  - platform: template
+    name: "Home Assistant URL"
+    id: ha_url_setting
+    optimistic: true
+    initial_value: "http://homeassistant.local:8123"
+    mode: text
+    icon: "mdi:web"
+    restore_value: true
+
+  # Maybe, Home Assistant media player entity.
+  # Not sure about this one yet
+  # - platform: template
+  #   name: "Media Player Entity"
+  #   id: media_player_entity_setting
+  #   optimistic: true
+  #   initial_value: "${media_player_entity}"
+  #   mode: text
+  #   icon: "mdi:speaker"
+  #   restore_value: true
+  #   entity_category: config
+  #   on_value:
+  #     then:
+  #       - lambda: |-
+  #           ESP_LOGI("settings", "Media Player Entity updated to: %s", x.c_str());
+
+switch:
+  - platform: template
+    name: "Auto Sleep"
+    id: auto_sleep_enabled
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    icon: "mdi:sleep"
+
+number:
+  - platform: template
+    name: "Backlight Timeout"
+    id: backlight_timeout_minutes
+    optimistic: true
+    min_value: 1
+    max_value: 120
+    initial_value: 30
+    step: 1
+    unit_of_measurement: "min"
+    icon: "mdi:timer-outline"
+    mode: box
+    restore_value: true
+    on_value:
+      then:
+        - lambda: |-
+            ESP_LOGI("settings", "Backlight timeout changed to %.0f minutes", x);
+
+# =========================
+# Apply colors to UI elements
+# =========================
+script:
+  - id: update_ui_colors
+    mode: restart
+    then:
+      # Update UI elements with new colors
+      - lvgl.label.update:
+          id: label_main_title
+          text_color: !lambda "return lv_color_hex(id(current_fg_color));"
+      - lvgl.label.update:
+          id: label_main_artist
+          text_color: !lambda "return lv_color_hex(id(current_fg_color));"
+      - lvgl.label.update:
+          id: label_main_album
+          text_color: !lambda "return lv_color_hex(id(current_fg_color));"
+      - lvgl.label.update:
+          id: label_main_progress
+          text_color: !lambda "return lv_color_hex(id(current_fg_color));"
+
+      # Favorite
+      - lvgl.label.update:
+          id: label_main_favorite
+          text_color: !lambda |-
+            return lv_color_hex(id(is_favorited) ? id(current_fg_color) : id(current_fg_dimmed));
+      - lvgl.button.update:
+          id: button_main_favorite
+          border_color: !lambda "return lv_color_hex(id(current_border_color));"
+
+      # Shuffle
+      - lvgl.label.update:
+          id: label_main_shuffle
+          text_color: !lambda |-
+            return lv_color_hex(id(is_shuffled) ? id(current_fg_color) : id(current_fg_dimmed));
+      - lvgl.button.update:
+          id: button_main_shuffle
+          border_color: !lambda "return lv_color_hex(id(current_border_color));"
+
+      # Previous
+      - lvgl.label.update:
+          id: label_main_previous
+          text_color: !lambda "return lv_color_hex(id(current_fg_color));"
+      - lvgl.button.update:
+          id: button_main_previous
+          border_color: !lambda "return lv_color_hex(id(current_border_color));"
+
+      # Play/Pause
+      - lvgl.label.update:
+          id: label_main_play_pause
+          text_color: !lambda "return lv_color_hex(id(current_fg_color));"
+      - lvgl.button.update:
+          id: button_main_play_pause
+          border_color: !lambda "return lv_color_hex(id(current_border_color));"
+
+      # Next
+      - lvgl.label.update:
+          id: label_main_next
+          text_color: !lambda "return lv_color_hex(id(current_fg_color));"
+      - lvgl.button.update:
+          id: button_main_next
+          border_color: !lambda "return lv_color_hex(id(current_border_color));"
+
+      # Volume
+      - lvgl.label.update:
+          id: label_main_volume
+          text_color: !lambda "return lv_color_hex(id(current_fg_color));"
+      - lvgl.button.update:
+          id: button_main_volume
+          border_color: !lambda "return lv_color_hex(id(current_border_color));"
+
+      # Playlist
+      - lvgl.label.update:
+          id: label_main_playlist
+          text_color: !lambda "return lv_color_hex(id(current_fg_color));"
+      - lvgl.button.update:
+          id: button_main_playlist
+          border_color: !lambda "return lv_color_hex(id(current_border_color));"
+
+      # Progress Bar
+      - lvgl.bar.update:
+          id: progress_bar
+          border_color: !lambda "return lv_color_hex(id(current_border_color));"
+
+      # Volume Page
+      - lvgl.label.update:
+          id: label_volume_volume
+          text_color: !lambda "return lv_color_hex(id(current_fg_color));"
+      - lvgl.button.update:
+          id: button_volume_back
+          border_color: !lambda "return lv_color_hex(id(current_border_color));"
+      - lvgl.slider.update:
+          id: slider_volume
+          bg_color: !lambda "return lv_color_hex(id(current_fg_dimmed));"
+          indicator:
+            bg_color: !lambda "return lv_color_hex(id(current_fg_color));"
+          knob: 
+            bg_color: !lambda "return lv_color_hex(id(current_fg_color));"
+      - lvgl.label.update:
+          id: label_volume_back
+          text_color: !lambda "return lv_color_hex(id(current_fg_color));"
+      
+      # Update playlist handler colors
+      - lambda: |-
+          playlist_handler.update_colors();
+
+select:
+  - platform: template
+    name: "Color Theme"
+    id: color_theme
+    optimistic: true
+    options:
+      - "Gold"
+      - "Blue"
+      - "Green"
+      - "Red"
+      - "Purple"
+      - "Orange"
+      - "Yellow"
+      - "Cyan"
+      - "Magenta"
+      - "Rainbow"
+    initial_option: "Gold"
+    icon: "mdi:palette"
+    restore_value: true
+    on_value:
+      then:
+        - lambda: |-
+            ESP_LOGI("settings", "Color theme changed to: %s", x.c_str());
+
+            // Check if Rainbow mode
+            if (x == "Rainbow") {
+              id(rainbow_enabled) = true;
+              id(rainbow_hue) = 0;
+              ESP_LOGI("settings", "Rainbow mode enabled");
+              return; // Don't set static colors, let the interval handle it
+            } else {
+              id(rainbow_enabled) = false;
+            }
+
+            // Update color globals based on selection
+            if (x == "Gold") {
+              id(current_fg_color) = 0xFFD700;
+              id(current_fg_dimmed) = 0x665500;
+            } else if (x == "Blue") {
+              id(current_fg_color) = 0x1E90FF;
+              id(current_fg_dimmed) = 0x0C3866;
+            } else if (x == "Green") {
+              id(current_fg_color) = 0x00FF00;
+              id(current_fg_dimmed) = 0x006600;
+            } else if (x == "Red") {
+              id(current_fg_color) = 0xFF0000;
+              id(current_fg_dimmed) = 0x660000;
+            } else if (x == "Purple") {
+              id(current_fg_color) = 0x9370DB;
+              id(current_fg_dimmed) = 0x3A2C56;
+            } else if (x == "Orange") {
+              id(current_fg_color) = 0xFF8800;
+              id(current_fg_dimmed) = 0x663300;
+            } else if (x == "Yellow") {
+              id(current_fg_color) = 0xFFFF00;
+              id(current_fg_dimmed) = 0x666600;
+            } else if (x == "Cyan") {
+              id(current_fg_color) = 0x00FFFF;
+              id(current_fg_dimmed) = 0x006666;
+            } else if (x == "Magenta") {
+              id(current_fg_color) = 0xFF00FF;
+              id(current_fg_dimmed) = 0x660066;
+            }
+        # Call the reusable script to update all UI colors
+        - script.execute: update_ui_colors
+
+# =========================
+# Online Image (for album art)
+# Requires CYD with PSRAM
+# =========================
+# online_image:
+#   - id: album_art_online
+#     url: "http://homeassistant.local:8123/local/media/album_art/placeholder.jpg"
+#     type: RGB
+#     format: JPEG
+#     # resize: 110x110
+#     update_interval: never
+#     # on_download_finished:
+#     #   then:
+#     #     - lambda: |-
+#     #         if (cached) {
+#     #           ESP_LOGD("online_image", "Cache hit: using cached image");
+#     #         } else {
+#     #           ESP_LOGD("online_image", "Cache miss: fresh download");
+#     #         }
+#     #     - component.update: tft_display
+
+# =========================
+# Media Player Sensors
+# =========================
+text_sensor:
+  # State/Play/Pause Button
+  - platform: homeassistant
+    entity_id: ${media_player_entity}
+    id: media_state
+    on_value:
+      then:
+        - lambda: |-
+            ESP_LOGD("main", "media_state: %s", x.c_str());
+        - lvgl.label.update:
+            id: label_main_play_pause
+            text: !lambda |-
+              // Compare strings using std::string::compare
+              if (0 == x.compare(std::string("playing")))
+                return std::string("\U000F03E4");  // mdi-pause
+              return std::string("\U000F040A");    // mdi-play
+        - lambda: |-
+            if (x == "playing") {
+              id(is_playing) = true;
+            } else {
+              id(is_playing) = false;
+            }
+
+  # Song Title
+  - platform: homeassistant
+    entity_id: ${media_player_entity}
+    attribute: media_title
+    id: media_title
+    on_value:
+      then:
+        - lambda: |-
+            ESP_LOGD("main", "media_title: %s", x.c_str());
+            // Keep awake while playing
+            id(last_activity) = millis();
+        - lvgl.label.update:
+            id: label_main_title
+            text: !lambda |-
+              return clean_unicode(x.c_str());
+        - delay: 3s
+        - lvgl.label.update:
+            id: status_label
+            text: " "
+
+  # Artist
+  - platform: homeassistant
+    entity_id: ${media_player_entity}
+    attribute: media_artist
+    id: media_artist
+    on_value:
+      then:
+        - lambda: |-
+            ESP_LOGD("main", "media_artist: %s", x.c_str());
+        - lvgl.label.update:
+            id: label_main_artist
+            text: !lambda |-
+              return clean_unicode(x.c_str());
+        - delay: 3s
+        - lvgl.label.update:
+            id: status_label
+            text: " "
+
+  # Album Name
+  - platform: homeassistant
+    entity_id: ${media_player_entity}
+    attribute: media_album_name
+    id: media_album
+    on_value:
+      then:
+        - lambda: |-
+            ESP_LOGD("main", "media_album: %s", x.c_str());
+        - lvgl.label.update:
+            id: label_main_album
+            text: !lambda |-
+              return clean_unicode(x.c_str());
+        - delay: 3s
+        - lvgl.label.update:
+            id: status_label
+            text: " "
+
+  # Album Art URL (for album art system)
+  # - platform: homeassistant
+  #   entity_id: ${media_player_entity_mass}
+  #   attribute: media_image_url
+  #   id: media_album_art
+  #   on_value:
+  #     then:
+  #       - lambda: |-
+  #           ESP_LOGD("main", "media_album_art: %s", x.c_str());
+
+  # Playlist Options from Home Assistant input_select
+  - platform: homeassistant
+    id: music_playlists
+    entity_id: input_select.music_playlists
+    internal: false
+    on_value:
+      then:
+        - lambda: |-
+            ESP_LOGD("main", "music_playlists value: %s", x.c_str());
+
+  # Get the options attribute which contains all available playlists
+  - platform: homeassistant
+    id: music_playlists_options
+    entity_id: input_select.music_playlists
+    attribute: options
+    on_value:
+      then:
+        - lambda: |-
+            ESP_LOGI("main", "Playlist options received: %s", x.c_str());
+            // Parse and update the playlist buttons
+            playlist_handler.update_playlists(x);
+
+  # Template sensor to hold the selected playlist
+  - platform: template
+    id: selected_playlist
+    name: "Selected Playlist"
+    internal: true
+    on_value:
+      then:
+        - lambda: |-
+            ESP_LOGI("main", "selected_playlist: %s", x.c_str());
+        - lvgl.label.update:
+            id: status_label
+            text: !lambda |-
+              return "Loading playlist: " + x;
+        - homeassistant.service:
+            service: input_select.select_option
+            data:
+              entity_id: input_select.music_playlists
+              option: !lambda "return x;"
+        - delay: 3s
+        - lvgl.label.update:
+            id: status_label
+            text: " "
+
+  # Album art cache key from Home Assistant (for when PSRAM is available)
+  # - platform: homeassistant
+  #   entity_id: input_text.current_album_cache_key
+  #   id: album_cache_key
+  #   on_value:
+  #     then:
+  #       - lambda: |-
+  #           if (!x.empty() && x != "unknown") {
+  #             std::string album_url = "${ha_url_setting}/local/media/album_art/" + x + ".jpg?v=" + std::to_string(millis());
+  #             ESP_LOGI("main", "Loading album art: %s", album_url.c_str());
+  #             id(album_art_online).set_url(album_url.c_str());
+  #             id(album_art_online).update();
+  #           }
+
+sensor:
+  # Position
+  - platform: homeassistant
+    entity_id: ${media_player_entity_mass}
+    attribute: media_position
+    id: media_position
+    internal: true
+    on_value:
+      then:
+        - lambda: |-
+            int pos = int(x);
+            ESP_LOGI("main", "local_position: %d", pos);
+            id(last_ha_position) = pos;
+            id(local_position) = pos;
+
+  # Duration
+  - platform: homeassistant
+    entity_id: ${media_player_entity_mass}
+    attribute: media_duration
+    id: media_duration
+    internal: true
+    on_value:
+      then:
+        - lambda: |-
+            ESP_LOGI("main", "media_duration: %f", x);
+
+
+  # Volume Level
+  - platform: homeassistant
+    entity_id: ${media_player_entity_mass}
+    attribute: volume_level
+    id: volume_level
+    on_value:
+      then:
+        - lambda: |-
+            ESP_LOGI("main", "volume_level: %f", x);
+        - lvgl.slider.update:
+            id: slider_volume
+            value: !lambda "return x * 100;"  # convert 0-1 to 0-100
+        - lvgl.label.update:
+            id: label_volume_volume
+            text: !lambda |-
+              char buf[8];
+              snprintf(buf, sizeof(buf), "%d%%", int(x * 100));
+              return std::string(buf);
+
+binary_sensor:
+  # Current track favorite status from Home Assistant
+  - platform: homeassistant
+    entity_id: input_boolean.current_track_is_favorite
+    id: current_track_favorite
+    publish_initial_state: true
+    on_state:
+      then:
+        - lambda: |-
+            id(is_favorited) = x;
+            ESP_LOGI("main", "Favorite state updated: %s", x ? "true" : "false");
+        - lvgl.label.update:
+            id: label_main_favorite
+            text: !lambda |-
+              if (x)
+                return std::string("\U000F02D1");  // mdi-heart (filled)
+              return std::string("\U000F02D5");    // mdi-heart-outline
+            text_color: !lambda |-
+              ESP_LOGI("main", "Favorite state updated: %s", x ? "true" : "false");
+              return lv_color_hex(x ? id(current_fg_color) : id(current_fg_dimmed));
+
+  # Shuffle State
+  - platform: homeassistant
+    entity_id: ${media_player_entity_mass}
+    attribute: shuffle
+    id: shuffle_state
+    publish_initial_state: true
+    on_state:
+      then:
+        - lambda: |-
+            id(is_shuffled) = x;
+            ESP_LOGI("main", "Shuffle state: %s - %s", x ? "ON" : "OFF", id(is_shuffled) ? "ON" : "OFF");
+        - lvgl.label.update:
+            id: label_main_shuffle
+            text_color: !lambda |-
+              ESP_LOGI("main", "Shuffle state updated: %s", x ? "true" : "false");
+              return lv_color_hex(x ? id(current_fg_color) : id(current_fg_dimmed));
+
+
+
+# =========================
+# Timers
+# =========================
+interval:
+  # Turn off backlight after 30 minutes
+  - interval: 1min
+    then:
+      - lambda: |-
+          ESP_LOGI("main", "last_activity: %d", id(last_activity));
+          int diff = millis() - id(last_activity);
+          ESP_LOGI("main", "diff: %d", diff);
+      - if:
+          condition:
+            lambda: |-
+              // Only timeout if auto_sleep is enabled
+              if (!id(auto_sleep_enabled).state) {
+                return false;
+              }
+              int timeout_ms = int(id(backlight_timeout_minutes).state * 60000);
+              return (millis() - id(last_activity)) > timeout_ms;
+          then:
+            - light.turn_off: backlight
+
+  # Update Progress Bar and Duration Counters
+  - interval: 1s
+    then:
+      - if:
+          condition:
+            lambda: |-
+              return id(is_playing) && id(media_duration).state > 0;
+          then:
+            - lambda: |-
+                id(local_position)++;
+
+                if (id(local_position) > int(id(media_duration).state)) {
+                  id(local_position) = int(id(media_duration).state);
+                }
+
+            - lvgl.bar.update:
+                id: progress_bar
+                value: !lambda |-
+                  int pos = id(local_position);
+                  int dur = int(id(media_duration).state);
+                  if (dur <= 0) return 0;
+                  int v = (pos * 1000) / dur;
+                  // ESP_LOGI("main", "bar pos=%d dur=%d val=%d", pos, dur, v);
+                  return v;
+
+            - lvgl.label.update:
+                id: label_main_progress
+                text: !lambda |-
+                  int pos = id(local_position);
+                  int dur = int(id(media_duration).state);
+                  // ESP_LOGI("main", "pos: %d", pos);
+                  // ESP_LOGI("main", "dur: %d", dur);
+                  int min_pos = pos / 60;
+                  int sec_pos = pos % 60;
+                  int min_dur = dur / 60;
+                  int sec_dur = dur % 60;
+                  char buf[32];
+                  snprintf(buf, sizeof(buf),
+                    "%02d:%02d / %02d:%02d",
+                    min_pos, sec_pos, min_dur, sec_dur);
+                  return std::string(buf);
+
+  # Rainbow color animation
+  - interval: 100ms
+    then:
+      - if:
+          condition:
+            lambda: 'return id(rainbow_enabled);'
+          then:
+            - lambda: |-
+                // Increment hue (0-360)
+                id(rainbow_hue) = (id(rainbow_hue) + 1) % 360;
+                
+                // Convert HSV to RGB
+                float h = id(rainbow_hue);
+                float s = 1.0;
+                float v = 1.0;
+                
+                float c = v * s;
+                float x = c * (1 - fabs(fmod(h / 60.0, 2) - 1));
+                float m = v - c;
+                
+                float r, g, b;
+                if (h < 60) {
+                  r = c; g = x; b = 0;
+                } else if (h < 120) {
+                  r = x; g = c; b = 0;
+                } else if (h < 180) {
+                  r = 0; g = c; b = x;
+                } else if (h < 240) {
+                  r = 0; g = x; b = c;
+                } else if (h < 300) {
+                  r = x; g = 0; b = c;
+                } else {
+                  r = c; g = 0; b = x;
+                }
+                
+                // Convert to 0-255 range and create hex color
+                uint8_t red = (r + m) * 255;
+                uint8_t green = (g + m) * 255;
+                uint8_t blue = (b + m) * 255;
+                
+                uint32_t color = (red << 16) | (green << 8) | blue;
+                id(current_fg_color) = color;
+                
+                // Create dimmed version (50% brightness)
+                uint8_t red_dim = red / 2;
+                uint8_t green_dim = green / 2;
+                uint8_t blue_dim = blue / 2;
+                id(current_fg_dimmed) = (red_dim << 16) | (green_dim << 8) | blue_dim;
+            
+            # Call the reusable script to update all UI colors
+            - script.execute: update_ui_colors
+
+font:
+  - file: "fonts/NotoSans_Condensed-Light.ttf"
+    id: main_font
+    size: 18
+    glyphsets:
+      - GF_Latin_Core
+      - GF_Latin_Vietnamese
+      - GF_Arabic_Core
+      - GF_Latin_Plus
+      - GF_Latin_Kernel
+      - GF_Latin_Beyond
+
+  - file: "fonts/NotoSans_Condensed-Light.ttf"
+    id: small_font
+    size: 14
+    glyphsets:
+      - GF_Latin_Core
+      - GF_Latin_Vietnamese
+      - GF_Arabic_Core
+      - GF_Latin_Plus
+      - GF_Latin_Kernel
+      - GF_Latin_Beyond
+
+  - file: "gfonts://Roboto"
+    id: mdi_font
+    size: 42
+    bpp: 4
+    extras:
+      - file: "fonts/materialdesignicons-webfont.ttf"
+        glyphs: [
+          "\U000F02D1", # mdi-heart
+          "\U000F05D4", # mdi-airplane-landing
+          "\U000F040A", # mdi-play
+          "\U000F03E4", # mdi-pause
+          "\U000F0CB8", # mdi-playlist
+          "\U000F04AD", # mdi-skip-next
+          "\U000F057F", # mdi-volume
+          "\U000F04AE", # mdi-skip-previous
+          ]
+
+  - file: "gfonts://Roboto"
+    id: mdi_font_small
+    size: 28
+    bpp: 4
+    extras:
+      - file: "fonts/materialdesignicons-webfont.ttf"
+        glyphs: [
+          "\U000F02D1", # mdi-heart
+          "\U000F02D5", # mdi-heart-outline
+          "\U000F049F", # mdi-shuffle
+          ]
+
+# =========================
+# LVGL UI
+# =========================
+lvgl:
+  buffer_size: 25%
+  bg_color: ${color_background}
+  text_color: ${color_foreground}
+
+  theme:
+    label:
+      text_color: ${color_foreground}
+    button:
+      bg_color: ${color_background_btn}
+      border_color: ${color_foreground}
+      border_width: 1
+      text_color: ${color_foreground}
+      pressed:
+        bg_color: ${color_background_btn_pressed}
+        border_color: ${color_foreground}
+    slider:
+      border_width: 1
+      border_opa: 15%
+      bg_color: ${color_background_btn}
+      bg_opa: 100%
+      indicator:
+        bg_color: ${color_foreground}
+        # bg_grad_color: ${color_foreground}
+        # bg_grad_dir: VER
+        bg_opa: COVER
+      knob:
+        bg_color: ${color_foreground}
+        # bg_grad_color: ${color_foreground}
+        border_color: ${color_foreground}
+
+  style_definitions:
+    - id: main_bar
+      radius: 6
+      bg_color: ${color_background_btn}
+      border_width: 1
+      border_color: ${color_border}
+
+  pages:
+    - id: main_page
+      widgets:
+        # Album Art (left side)
+        # Enable when PSRAM available
+        # Uncomment and adjust x positions:
+        # - label_main_title, label_main_artist, label_main_album, button_main_favorite
+        #   x: 130
+        # - button_main_shuffle x:
+        #   x: 186
+        ####
+        # - image:
+        #     id: album_art_image
+        #     x: 10
+        #     y: 2
+        #     src: album_art_online
+
+        # x+130 if i ever get the damn image loader to run without crashing
+        # Song Title
+        - label:
+            id: label_main_title
+            x: 10
+            y: 2
+            width: 300
+            height: 25
+            text: "Connecting to WiFi..."
+            text_font: main_font
+            long_mode: scroll_circular
+
+        # Artist
+        - label:
+            id: label_main_artist
+            x: 10
+            y: 30
+            width: 300
+            height: 25
+            text: "Please wait..."
+            text_font: main_font
+
+        # Album
+        - label:
+            id: label_main_album
+            x: 10
+            y: 60
+            width: 300
+            height: 20
+            text: " "
+            text_font: small_font
+
+        # Heart/Favorite
+        - button:
+            id: button_main_favorite
+            x: 10
+            y: 85
+            width: 36
+            height: 36
+            widgets:
+              - label:
+                  id: label_main_favorite
+                  align: CENTER
+                  text_font: mdi_font_small
+                  text: "\U000F02D5"  # mdi-heart-outline
+                  text_color: !lambda |-
+                    return lv_color_hex(id(is_favorited) ? id(current_fg_color) : id(current_fg_dimmed));
+            on_click:
+              - if:
+                  condition:
+                    lambda: 'return !id(is_favorited);'
+                  then:
+                    # Favorite the song
+                    - homeassistant.service:
+                        service: button.press
+                        data:
+                          entity_id: ${entity_button_favorite}
+                    - lambda: |-
+                        id(is_favorited) = true;
+                    - lvgl.label.update:
+                        id: label_main_favorite
+                        text: "\U000F02D1"  # mdi-heart (filled)
+                  else:
+                    # Unfavorite the song
+                    - homeassistant.service:
+                        service: button.press
+                        data:
+                          entity_id: ${entity_button_favorite}
+                    - lambda: |-
+                        id(is_favorited) = false;
+                    - lvgl.label.update:
+                        id: label_main_favorite
+                        text: "\U000F02D5"  # mdi-heart-outline
+
+        # Shuffle
+        - button:
+            id: button_main_shuffle
+            x: 56
+            y: 85
+            width: 36
+            height: 36
+            widgets:
+              - label:
+                  id: label_main_shuffle
+                  align: CENTER
+                  text_font: mdi_font_small
+                  text: "\U000F049F"  # mdi-shuffle
+                  text_color: !lambda |-
+                    return lv_color_hex(id(is_shuffled) ? id(current_fg_color) : id(current_fg_dimmed));
+            on_click:
+              - homeassistant.service:
+                  service: media_player.shuffle_set
+                  data:
+                    device_id: ${media_player_device}
+                    shuffle: !lambda |-
+                      // If shuffle_state hasn't been received yet, default to true
+                      if (!id(shuffle_state).has_state()) {
+                        ESP_LOGD("main", "Shuffle state unknown, enabling shuffle");
+                        return "true";
+                      }
+                      // Toggle based on current state
+                      bool new_state = !id(is_shuffled);
+                      ESP_LOGD("main", "Toggling shuffle from %s to %s", id(is_shuffled) ? "ON" : "OFF", new_state ? "ON" : "OFF");
+                      // id(is_shuffled) = new_state ? "true" : "false";
+                      ESP_LOGD("main", "Shuffle: %s", id(is_shuffled) ? "ON" : "OFF");
+                      return new_state ? "true" : "false";
+
+        # Status Label (above progress bar)
+        - label:
+            id: status_label
+            x: 10
+            y: 120
+            width: 300
+            height: 20
+            text: " "
+            text_font: small_font
+            text_color: ${color_foreground_status}
+
+        # Progress Bar
+        - label:
+            id: label_main_progress
+            x: 10
+            y: 140
+            width: 300
+            height: 20
+            text: "00:00 / 00:00"
+
+        - bar:
+            id: progress_bar
+            x: 10
+            y: 160
+            width: 300
+            height: 12
+            min_value: 0
+            max_value: 1000
+            animated: true
+            anim_time: 300ms
+            value: !lambda |-
+              if (id(media_duration).state > 0)
+                return (id(media_position).state / id(media_duration).state);
+              return 0;
+            styles: main_bar
+            on_press:
+              - homeassistant.service:
+                  service: media_player.media_seek
+                  data:
+                    entity_id: ${media_player_entity}
+                    seek_position: !lambda |-
+                      int touch_x = id(seek_position);
+                      int bar_x = 10;
+                      int bar_width = 300;
+
+                      // Calculate relative position (0.0 to 1.0)
+                      float relative_pos = float(touch_x - bar_x) / bar_width;
+
+                      // Clamp between 0 and 1
+                      if (relative_pos < 0.0) relative_pos = 0.0;
+                      if (relative_pos > 1.0) relative_pos = 1.0;
+
+                      // Calculate seek position in seconds
+                      int duration = int(id(media_duration).state);
+                      int seek_pos = int(relative_pos * duration);
+
+                      ESP_LOGI("seek", "Touch X: %d, Relative: %.2f, Duration: %d, Seek: %d",
+                               touch_x, relative_pos, duration, seek_pos);
+
+                      // Update local position immediately for smoother UI
+                      id(local_position) = seek_pos;
+
+                      return float(seek_pos);
+
+        # Bottom row buttons
+        - button:
+            id: button_main_previous
+            x: 13
+            y: 180
+            width: 50
+            height: 50
+            widgets:
+              - label:
+                  id: label_main_previous
+                  align: CENTER
+                  text_font: mdi_font
+                  text: "\U000F04AE"
+            on_click:
+              - homeassistant.service:
+                  service: media_player.media_previous_track
+                  data:
+                    device_id: ${media_player_device}
+
+        - button:
+            id: button_main_play_pause
+            x: 74
+            y: 180
+            width: 50
+            height: 50
+            widgets:
+              - label:
+                  id: label_main_play_pause
+                  text_font: mdi_font
+                  text: "\U000F040A"
+                  text_align: CENTER
+                  align: CENTER
+            on_click:
+              - homeassistant.service:
+                  service: media_player.media_play_pause
+                  data:
+                    # entity_id: ${media_player_entity}
+                    device_id: ${media_player_device}
+
+        - button:
+            id: button_main_next
+            x: 134
+            y: 180
+            width: 50
+            height: 50
+            widgets:
+              - label:
+                  id: label_main_next
+                  align: CENTER
+                  text_font: mdi_font
+                  text: "\U000F04AD"
+            on_click:
+              - homeassistant.service:
+                  action: media_player.media_next_track
+                  data:
+                    device_id: ${media_player_device}
+
+        - button:
+            id: button_main_volume
+            x: 194
+            y: 180
+            width: 50
+            height: 50
+            widgets:
+              - label:
+                  id: label_main_volume
+                  align: CENTER
+                  text_font: mdi_font
+                  text: "\U000F057F"
+            on_click:
+              - lvgl.page.show: page_volume
+
+        - button:
+            id: button_main_playlist
+            x: 254
+            y: 180
+            width: 50
+            height: 50
+            widgets:
+              - label:
+                  id: label_main_playlist
+                  align: CENTER
+                  text_font: mdi_font
+                  text: "\U000F0CB8"
+            on_click:
+              - lvgl.page.show: page_playlist
+
+    # =========================
+    # PLAYLIST PAGE
+    # =========================
+    - id: page_playlist
+      widgets: []
+      on_boot:
+        then:
+          - lambda: |-
+              playlist_handler.parent = id(page_playlist)->obj;
+              playlist_handler.setup();
+
+              // Trigger initial playlist load
+              if (id(music_playlists_options).has_state()) {
+                playlist_handler.update_playlists(id(music_playlists_options).state);
+              }
+
+    # =========================
+    # VOLUME POPUP
+    # =========================
+    - id: page_volume
+      scrollable: false
+      widgets:
+        - label:
+            id: label_volume_volume
+            x: 10
+            y: 40
+            width: 300
+            height: 20
+            text: !lambda |-
+              int vol = int(id(volume_level).state * 100);
+              char buf[8];
+              snprintf(buf, sizeof(buf), "%d%%", vol);
+              return std::string(buf);
+
+        - slider:
+            id: slider_volume
+            x: 10
+            y: 80
+            width: 300
+            height: 12
+            value: !lambda "return id(volume_level).state * 100;"
+            on_value:
+              then:
+                - homeassistant.service:
+                    service: media_player.volume_set
+                    data:
+                      entity_id: ${media_player_entity}
+                      volume_level: !lambda "return x / 100.0;"
+
+        - button:
+            id: button_volume_back
+            x: 18
+            y: 190
+            width: 280
+            height: 50
+            widgets:
+              - label:
+                  id: label_volume_back
+                  align: CENTER
+                  text_font: main_font
+                  text: "Back to Player"
+            on_click:
+              - lvgl.page.show: main_page
