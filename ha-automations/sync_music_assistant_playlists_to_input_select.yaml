@@ -1,0 +1,30 @@
+alias: Sync Music Assistant Playlists to Input Select
+description: ""
+triggers:
+  - trigger: time_pattern
+    hours: /1
+  - trigger: homeassistant
+    event: start
+conditions: []
+actions:
+  - action: music_assistant.get_library
+    metadata: {}
+    data:
+      limit: 500
+      offset: 0
+      config_entry_id: <config entry id>
+      media_type: playlist
+      order_by: name
+    response_variable: playlists_data
+  - action: input_select.set_options
+    metadata: {}
+    data:
+      options: |
+        {% if playlists_data and playlists_data['items'] %}
+          {{ playlists_data['items'] | map(attribute='name') | list | sort }}
+        {% else %}
+          ['No playlists found']
+        {% endif %}
+    target:
+      entity_id: input_select.music_playlists
+mode: single
