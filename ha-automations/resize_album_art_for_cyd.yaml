@@ -1,0 +1,43 @@
+alias: Resize Album Art for CYD
+description: Downloads and resizes album art with caching
+triggers:
+  - entity_id: media_player.<media player>
+    attribute: entity_picture
+    trigger: state
+conditions:
+  - condition: template
+    value_template: "{{ entity_picture not in [none, 'unknown', 'unavailable', ''] }}"
+actions:
+  - data:
+      url: |
+        {% if entity_picture.startswith('http') %}
+          {{ entity_picture }}
+        {% else %}
+          <home assistant url>{{ entity_picture }}
+        {% endif %}
+      artist: "{{ media_artist }}"
+      album: "{{ media_album }}"
+      title: "{{ media_title }}"
+    action: shell_command.resize_album_art
+  - delay: 2
+  - target:
+      entity_id: input_text.current_album_cache_key
+    data:
+      value: >
+        {% set artist = media_artist | lower | regex_replace('[^a-z0-9]', '_')
+        %} {% if media_album and media_album | lower not in ['unknown', 'none',
+        ''] %}
+          {{ artist }}_{{ media_album | lower | regex_replace('[^a-z0-9]', '_') }}
+        {% else %}
+          {{ artist }}_{{ media_title | lower | regex_replace('[^a-z0-9]', '_') }}
+        {% endif %}
+    action: input_text.set_value
+variables:
+  entity_picture: "{{ state_attr('media_player.<media player>', 'entity_picture') }}"
+  media_artist: "{{ state_attr('media_player.<media player>', 'media_artist') }}"
+  media_album: >-
+    {{ state_attr('media_player.<media player>', 'media_album_name')
+    }}
+  media_title: "{{ state_attr('media_player.<media player>', 'media_title') }}"
+mode: parallel
+max: 5
