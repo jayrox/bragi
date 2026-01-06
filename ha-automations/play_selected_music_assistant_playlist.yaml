@@ -1,0 +1,33 @@
+alias: Play Selected Music Assistant Playlist
+description: Plays the playlist selected in input_select.music_playlists
+triggers:
+  - entity_id: input_select.music_playlists
+    trigger: state
+conditions:
+  - condition: template
+    value_template: >-
+      {{ trigger.to_state.state not in ['unknown', 'unavailable', 'Loading
+      playlists...', 'No playlists found'] }}
+actions:
+  - action: music_assistant.get_library
+    metadata: {}
+    data:
+      limit: 500
+      offset: 0
+      config_entry_id: <config entry id>
+      media_type: playlist
+      order_by: name
+    response_variable: playlists_data
+  - action: music_assistant.play_media
+    metadata: {}
+    target:
+      entity_id: media_player.<media player>
+    data:
+      media_id: >
+        {% set selected = states('input_select.music_playlists') %} {% set ns =
+        namespace(uri='') %} {% for item in playlists_data['items'] %}
+          {% if item['name'] == selected %}
+            {% set ns.uri = item['uri'] %}
+          {% endif %}
+        {% endfor %} {{ ns.uri }}
+mode: single
