@@ -21,7 +21,7 @@ actions:
   - action: music_assistant.play_media
     metadata: {}
     target:
-      entity_id: media_player.<media player>
+      entity_id: media_player.<<media player id>
     data:
       media_id: >
         {% set selected = states('input_select.music_playlists') %} {% set ns =
