@@ -1,27 +1,27 @@
 alias: Update Current Track Favorite Status
 description: Checks if the currently playing track is favorited in Music Assistant
 triggers:
-  - entity_id: media_player.<music player>
+  - entity_id: media_player.<media player id>
     attribute: media_title
     trigger: state
-  - entity_id: button.<music player>_favorite_current_song
+  - entity_id: button.<media player id>_favorite_current_song
     trigger: state
 conditions:
   - condition: template
     value_template: >-
-      {{ state_attr('media_player.<music player>', 'media_title') not in
+      {{ state_attr('media_player.<media player id>', 'media_title') not in
       ['unknown', 'unavailable', None] }}
 actions:
   - data:
       limit: 25
       config_entry_id: <config entry id>
       media_type: track
-      search: "{{ state_attr('media_player.gaming_room_speaker', 'media_title') }}"
+      search: "{{ state_attr('media_player.<media player id>', 'media_title') }}"
     response_variable: track_results
     action: music_assistant.get_library
   - variables:
-      current_artist: "{{ state_attr('media_player.<music player>', 'media_artist') }}"
-      current_album: "{{ state_attr('media_player.<music player>', 'media_album_name') }}"
+      current_artist: "{{ state_attr('media_player.<media player id>', 'media_artist') }}"
+      current_album: "{{ state_attr('media_player.<media player id>', 'media_album_name') }}"
       matching_favorite: >
         {% set ns = namespace(found=false) %} {% for item in
         track_results['items'] %}
