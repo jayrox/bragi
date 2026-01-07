@@ -1,7 +1,9 @@
 # Bragi is an ESPHome CYD device that interacts with Home Assistant and Music Assistant to control a media player's state.
 
 ----
-It does not play music on its own. Can display album art if you have a CYD that has PSRAM, uncomment the features in the config.yaml to enable. 
+It does not play music on its own. Can display album art if you have a CYD that has PSRAM, uncomment the features in the config.yaml to enable.
+
+
 
 ### Requires 3 Home Assistant Helpers:
 * input_text.current_album_cache_key
