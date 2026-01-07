@@ -1,7 +1,7 @@
 alias: Resize Album Art for CYD
 description: Downloads and resizes album art with caching
 triggers:
-  - entity_id: media_player.<media player>
+  - entity_id: media_player.<media player id>
     attribute: entity_picture
     trigger: state
 conditions:
@@ -33,11 +33,11 @@ actions:
         {% endif %}
     action: input_text.set_value
 variables:
-  entity_picture: "{{ state_attr('media_player.<media player>', 'entity_picture') }}"
-  media_artist: "{{ state_attr('media_player.<media player>', 'media_artist') }}"
+  entity_picture: "{{ state_attr('media_player.<media player id>', 'entity_picture') }}"
+  media_artist: "{{ state_attr('media_player.<media player id>', 'media_artist') }}"
   media_album: >-
-    {{ state_attr('media_player.<media player>', 'media_album_name')
+    {{ state_attr('media_player.<media player id>', 'media_album_name')
     }}
-  media_title: "{{ state_attr('media_player.<media player>', 'media_title') }}"
+  media_title: "{{ state_attr('media_player.<media player id>', 'media_title') }}"
 mode: parallel
 max: 5
