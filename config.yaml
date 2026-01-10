@@ -40,10 +40,6 @@ substitutions:
   color_border: 0x555555
   color_foreground_status: 0xAAAAAA
 
-  # Media Player Name
-  # media_player.<speaker name>
-  media_player_entity: 
-
   # Media Player Name in Home Assistant from the Music Assistant Integration
   # media_player.<speaker name>
   media_player_entity_mass: media_player.<speaker name>
@@ -333,7 +329,7 @@ text:
   #   name: "Media Player Entity"
   #   id: media_player_entity_setting
   #   optimistic: true
-  #   initial_value: "${media_player_entity}"
+  #   initial_value: "${media_player_entity_mass}"
   #   mode: text
   #   icon: "mdi:speaker"
   #   restore_value: true
@@ -568,7 +564,7 @@ select:
 text_sensor:
   # State/Play/Pause Button
   - platform: homeassistant
-    entity_id: ${media_player_entity}
+    entity_id: ${media_player_entity_mass}
     id: media_state
     on_value:
       then:
@@ -590,7 +586,7 @@ text_sensor:
 
   # Song Title
   - platform: homeassistant
-    entity_id: ${media_player_entity}
+    entity_id: ${media_player_entity_mass}
     attribute: media_title
     id: media_title
     on_value:
@@ -610,7 +606,7 @@ text_sensor:
 
   # Artist
   - platform: homeassistant
-    entity_id: ${media_player_entity}
+    entity_id: ${media_player_entity_mass}
     attribute: media_artist
     id: media_artist
     on_value:
@@ -628,7 +624,7 @@ text_sensor:
 
   # Album Name
   - platform: homeassistant
-    entity_id: ${media_player_entity}
+    entity_id: ${media_player_entity_mass}
     attribute: media_album_name
     id: media_album
     on_value:
@@ -1172,7 +1168,7 @@ lvgl:
               - homeassistant.service:
                   service: media_player.media_seek
                   data:
-                    entity_id: ${media_player_entity}
+                    entity_id: ${media_player_entity_mass}
                     seek_position: !lambda |-
                       int touch_x = id(seek_position);
                       int bar_x = 10;
@@ -1324,12 +1320,12 @@ lvgl:
             width: 300
             height: 12
             value: !lambda "return id(volume_level).state * 100;"
-            on_value:
+            on_release:
               then:
                 - homeassistant.service:
                     service: media_player.volume_set
                     data:
-                      entity_id: ${media_player_entity}
+                      entity_id: ${media_player_entity_mass}
                       volume_level: !lambda "return x / 100.0;"
 
         - button:
