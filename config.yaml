@@ -48,14 +48,6 @@ substitutions:
   # media_player.<speaker name>
   media_player_entity_mass: media_player.<speaker name>
 
-  # Media Player Device Id
-  # Home Assistant > Devices and Entities > Entites > Search for Media Player
-  # - Click the Media Player from the Music Assistant Integration
-  # - Click the 3 dots on the top right of the popup
-  # - Click "Device info"
-  # - From the URL copy the last segment from the URL after /config/devices/device/
-  media_player_device: 
-
   # Entity used to favorite the current song
   # - Home Assistant > Devices and Entities > Entites > Search for Media Player
   # - Click Favorite current song
@@ -1127,7 +1119,7 @@ lvgl:
               - homeassistant.service:
                   service: media_player.shuffle_set
                   data:
-                    device_id: ${media_player_device}
+                    entity_id: ${media_player_entity_mass}
                     shuffle: !lambda |-
                       // If shuffle_state hasn't been received yet, default to true
                       if (!id(shuffle_state).has_state()) {
@@ -1222,7 +1214,7 @@ lvgl:
               - homeassistant.service:
                   service: media_player.media_previous_track
                   data:
-                    device_id: ${media_player_device}
+                    entity_id: ${media_player_entity_mass}
 
         - button:
             id: button_main_play_pause
@@ -1241,8 +1233,7 @@ lvgl:
               - homeassistant.service:
                   service: media_player.media_play_pause
                   data:
-                    # entity_id: ${media_player_entity}
-                    device_id: ${media_player_device}
+                    entity_id: ${media_player_entity_mass}
 
         - button:
             id: button_main_next
@@ -1260,7 +1251,7 @@ lvgl:
               - homeassistant.service:
                   action: media_player.media_next_track
                   data:
-                    device_id: ${media_player_device}
+                    entity_id: ${media_player_entity_mass}
 
         - button:
             id: button_main_volume
