@@ -667,10 +667,10 @@ text_sensor:
               std::string base_url = id(ha_url_setting).state;
               std::string album_url = base_url + "/local/media/album_art/" + x + ".rgb565";
               
-              ESP_LOGI("main", "Loading PNG: %s", album_url.c_str());
+              ESP_LOGI("main", "Loading RGB565: %s", album_url.c_str());
               
               if (image_loader.load_image(album_url, x)) {
-                ESP_LOGI("main", "PNG loaded: %d bytes", image_loader.get_size());
+                ESP_LOGI("main", "RGB565 loaded: %d bytes", image_loader.get_size());
                 
                 // Try with explicit dimensions and RGB565 format
                 static lv_img_dsc_t img_dsc;
@@ -683,7 +683,7 @@ text_sensor:
                 
                 lv_img_set_src(id(album_art_img), &img_dsc);
                 
-                ESP_LOGI("main", "PNG displayed. Free heap: %d bytes", ESP.getFreeHeap());
+                ESP_LOGI("main", "RGB565 displayed. Free heap: %d bytes", ESP.getFreeHeap());
               }
             } else {
               image_loader.free_image();
