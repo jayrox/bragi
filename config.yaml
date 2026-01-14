@@ -564,6 +564,13 @@ text_sensor:
             ESP_LOGD("main", "media_title: %s", x.c_str());
             // Keep awake while playing
             id(last_activity) = millis();
+
+            // Check if album is set, if not set it to empty space
+            std::string album = id(media_album).state;
+            if (album.empty() || album == "unknown" || album == "unavailable" || album == "none") {
+              ESP_LOGD("main", "Album not set, setting to space");
+              id(media_album).publish_state(" ");
+            }
         - lvgl.label.update:
             id: label_main_title
             text: !lambda |-
