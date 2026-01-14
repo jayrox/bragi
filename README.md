@@ -18,6 +18,12 @@ Sorry there are so many entity ids that need to be updated, it seems that not al
 * \<media player id>: replace with the media_player entity id from Home Assistant
 * \<home assistant url>: replace with your Home Assistant URL without the trailing slash, this is used to generate the resized album art
 
+### configuration.yaml
+```
+shell_command:
+  resize_album_art: python3 /config/python_scripts/resize_album_art.py --url "{{ url }}" --artist "{{ artist }}" --album "{{ album }}" --title "{{ title }}"
+```
+
 ### Known Issues:
 * Favoriting a song works but doesn't show up directly on the Music Assistant app, not sure why. Hopefully this gets fixed by their team.
   - This issue can be fixed by using AppDaemon and the python script in the app_daemon folder.
