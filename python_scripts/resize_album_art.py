@@ -7,6 +7,7 @@ from io import BytesIO
 import os
 import time
 from datetime import datetime
+import struct
 
 # Get arguments
 url = sys.argv[1] if len(sys.argv) > 1 else ''
@@ -51,14 +52,14 @@ try:
     cache_dir = '/config/www/media/album_art'
     os.makedirs(cache_dir, exist_ok=True)
     
-    cache_file = f"{cache_dir}/{cache_key}.jpg"
-    log(f"Cache file path: {cache_file}")
+    cache_file_rgb565 = f"{cache_dir}/{cache_key}.rgb565"
+    log(f"Cache file path: {cache_file_rgb565}")
     
     # Check if cached version exists
-    if os.path.exists(cache_file):
+    if os.path.exists(cache_file_rgb565):
         log(f"Using cached album art: {cache_key}")
-        file_size = os.path.getsize(cache_file)
-        log(f"Cached file size: {file_size} bytes")
+        file_size = os.path.getsize(cache_file_rgb565)
+        log(f"Cached RGB565 file size: {file_size} bytes")
     else:
         # Download with retry logic
         max_retries = 3
@@ -110,20 +111,31 @@ try:
         log(f"Resized to: {img.size}")
         
         # Reduce color palette to 256 colors for smaller file size
-        # This significantly reduces RAM usage when loading
-        img = img.quantize(colors=256, method=2)
-        img = img.convert('RGB')  # Convert back to RGB for JPEG
+        img_reduced = img.quantize(colors=256, method=2)
+        img_reduced = img_reduced.convert('RGB')
         log(f"Reduced to 256 colors")
         
-        # Save with aggressive compression
-        img.save(cache_file, 'JPEG', 
-                 quality=50,           # Lower quality = smaller file
-                 optimize=True,        # Optimize compression
-                 progressive=False,    # No progressive (simpler decoding)
-                 subsampling=2)        # 4:2:0 chroma subsampling
+        # Save RGB565 raw format for LVGL (Big-Endian)
+        pixels = []
+        for y in range(110):
+            for x in range(110):
+                r, g, b = img_reduced.getpixel((x, y))
+                # Convert RGB888 to RGB565
+                # R: 8 bits -> 5 bits (>> 3)
+                # G: 8 bits -> 6 bits (>> 2)
+                # B: 8 bits -> 5 bits (>> 3)
+                rgb565 = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
+                # Pack as BIG-ENDIAN 16-bit unsigned integer (>H not <H)
+                pixels.append(struct.pack('>H', rgb565))
         
-        file_size = os.path.getsize(cache_file)
-        log(f"Cached album art: {cache_key} ({file_size} bytes)")
+        with open(cache_file_rgb565, 'wb') as f:
+            f.write(b''.join(pixels))
+        
+        rgb565_size = os.path.getsize(cache_file_rgb565)
+        log(f"Saved RGB565 (big-endian): {rgb565_size} bytes (should be 24200 bytes for 110x110)")
+        
+        if rgb565_size != 24200:
+            log(f"WARNING: RGB565 file size is incorrect! Expected 24200 bytes, got {rgb565_size}")
     
     # Output the cache key for Home Assistant to read
     print(f"CACHE_KEY:{cache_key}")
