@@ -13,12 +13,16 @@
 #
 # Required includes:
 # - "includes/clean_unicode.h"
+# - "includes/image_loader.h"
 # - "includes/playlist_handler.h"
 #
 # Required for playlist functionality in Home Assistant:
 # - input_select.music_playlists
 # - automation.play_selected_music_assistant_playlist
 # - automation.sync_music_assistant_playlists_to_input_select
+#
+# Required for album art
+# - automation.resize_album_art_for_cyd
 #
 # Required for Favorites:
 # - input_boolean.current_track_is_favorite
@@ -69,17 +73,12 @@ esphome:
   includes:
     - includes/clean_unicode.h
     - includes/playlist_handler.h
+    - includes/image_loader.h
 
 esp32:
   board: esp32dev
   framework:
     type: arduino
-    # Enable when using CYD with PSRAM for album art support
-    # sdkconfig_options:
-    #   CONFIG_ESP32_SPIRAM_SUPPORT: y
-
-# Uncomment when using CYD with PSRAM
-# psram:
 
 wifi:
   ssid: !secret wifi_ssid
@@ -301,10 +300,9 @@ output:
     pin: GPIO21
     id: backlight_pwm
 
-#
+# =========================
 # Configuration items from within Home Assistant
-#
-
+# =========================
 light:
   - platform: monochromatic
     output: backlight_pwm
@@ -322,22 +320,6 @@ text:
     mode: text
     icon: "mdi:web"
     restore_value: true
-
-  # Maybe, Home Assistant media player entity.
-  # Not sure about this one yet
-  # - platform: template
-  #   name: "Media Player Entity"
-  #   id: media_player_entity_setting
-  #   optimistic: true
-  #   initial_value: "${media_player_entity_mass}"
-  #   mode: text
-  #   icon: "mdi:speaker"
-  #   restore_value: true
-  #   entity_category: config
-  #   on_value:
-  #     then:
-  #       - lambda: |-
-  #           ESP_LOGI("settings", "Media Player Entity updated to: %s", x.c_str());
 
 switch:
   - platform: template
@@ -538,25 +520,13 @@ select:
         - script.execute: update_ui_colors
 
 # =========================
-# Online Image (for album art)
-# Requires CYD with PSRAM
+# Album Art
 # =========================
-# online_image:
-#   - id: album_art_online
-#     url: "http://homeassistant.local:8123/local/media/album_art/placeholder.jpg"
-#     type: RGB
-#     format: JPEG
-#     # resize: 110x110
-#     update_interval: never
-#     # on_download_finished:
-#     #   then:
-#     #     - lambda: |-
-#     #         if (cached) {
-#     #           ESP_LOGD("online_image", "Cache hit: using cached image");
-#     #         } else {
-#     #           ESP_LOGD("online_image", "Cache miss: fresh download");
-#     #         }
-#     #     - component.update: tft_display
+image:
+  - id: album_art_placeholder
+    file: "mdi:album"
+    resize: 110x110
+    type: RGB565
 
 # =========================
 # Media Player Sensors
@@ -573,7 +543,6 @@ text_sensor:
         - lvgl.label.update:
             id: label_main_play_pause
             text: !lambda |-
-              // Compare strings using std::string::compare
               if (0 == x.compare(std::string("playing")))
                 return std::string("\U000F03E4");  // mdi-pause
               return std::string("\U000F040A");    // mdi-play
@@ -640,16 +609,6 @@ text_sensor:
             id: status_label
             text: " "
 
-  # Album Art URL (for album art system)
-  # - platform: homeassistant
-  #   entity_id: ${media_player_entity_mass}
-  #   attribute: media_image_url
-  #   id: media_album_art
-  #   on_value:
-  #     then:
-  #       - lambda: |-
-  #           ESP_LOGD("main", "media_album_art: %s", x.c_str());
-
   # Playlist Options from Home Assistant input_select
   - platform: homeassistant
     id: music_playlists
@@ -696,18 +655,40 @@ text_sensor:
             text: " "
 
   # Album art cache key from Home Assistant (for when PSRAM is available)
-  # - platform: homeassistant
-  #   entity_id: input_text.current_album_cache_key
-  #   id: album_cache_key
-  #   on_value:
-  #     then:
-  #       - lambda: |-
-  #           if (!x.empty() && x != "unknown") {
-  #             std::string album_url = "${ha_url_setting}/local/media/album_art/" + x + ".jpg?v=" + std::to_string(millis());
-  #             ESP_LOGI("main", "Loading album art: %s", album_url.c_str());
-  #             id(album_art_online).set_url(album_url.c_str());
-  #             id(album_art_online).update();
-  #           }
+  - platform: homeassistant
+    entity_id: input_text.current_album_cache_key
+    id: album_cache_key
+    on_value:
+      then:
+        - lambda: |-
+            ESP_LOGI("main", "Free heap: %d bytes", ESP.getFreeHeap());
+            
+            if (!x.empty() && x != "unknown") {
+              std::string base_url = id(ha_url_setting).state;
+              std::string album_url = base_url + "/local/media/album_art/" + x + ".rgb565";
+              
+              ESP_LOGI("main", "Loading PNG: %s", album_url.c_str());
+              
+              if (image_loader.load_image(album_url, x)) {
+                ESP_LOGI("main", "PNG loaded: %d bytes", image_loader.get_size());
+                
+                // Try with explicit dimensions and RGB565 format
+                static lv_img_dsc_t img_dsc;
+                img_dsc.header.always_zero = 0;
+                img_dsc.header.cf = LV_IMG_CF_TRUE_COLOR_CHROMA_KEYED;  // Try this
+                img_dsc.header.w = 110;
+                img_dsc.header.h = 110;
+                img_dsc.data_size = 24200;
+                img_dsc.data = image_loader.get_data();
+                
+                lv_img_set_src(id(album_art_img), &img_dsc);
+                
+                ESP_LOGI("main", "PNG displayed. Free heap: %d bytes", ESP.getFreeHeap());
+              }
+            } else {
+              image_loader.free_image();
+              lv_img_set_src(id(album_art_img), id(album_art_placeholder));
+            }
 
 sensor:
   # Position
@@ -755,12 +736,18 @@ sensor:
               snprintf(buf, sizeof(buf), "%d%%", int(x * 100));
               return std::string(buf);
 
+  - platform: template
+    name: "Bragi Free Heap"
+    lambda: 'return ESP.getFreeHeap();'
+    update_interval: 5s
+    unit_of_measurement: "bytes"
+
 binary_sensor:
   # Current track favorite status from Home Assistant
   - platform: homeassistant
     entity_id: input_boolean.current_track_is_favorite
     id: current_track_favorite
-    publish_initial_state: true
+    trigger_on_initial_state: true
     on_state:
       then:
         - lambda: |-
@@ -781,7 +768,7 @@ binary_sensor:
     entity_id: ${media_player_entity_mass}
     attribute: shuffle
     id: shuffle_state
-    publish_initial_state: true
+    trigger_on_initial_state: true
     on_state:
       then:
         - lambda: |-
@@ -792,7 +779,6 @@ binary_sensor:
             text_color: !lambda |-
               ESP_LOGI("main", "Shuffle state updated: %s", x ? "true" : "false");
               return lv_color_hex(x ? id(current_fg_color) : id(current_fg_dimmed));
-
 
 
 # =========================
@@ -971,6 +957,7 @@ lvgl:
   buffer_size: 25%
   bg_color: ${color_background}
   text_color: ${color_foreground}
+  default_font: main_font
 
   theme:
     label:
@@ -990,12 +977,9 @@ lvgl:
       bg_opa: 100%
       indicator:
         bg_color: ${color_foreground}
-        # bg_grad_color: ${color_foreground}
-        # bg_grad_dir: VER
         bg_opa: COVER
       knob:
         bg_color: ${color_foreground}
-        # bg_grad_color: ${color_foreground}
         border_color: ${color_foreground}
 
   style_definitions:
@@ -1009,47 +993,37 @@ lvgl:
     - id: main_page
       widgets:
         # Album Art (left side)
-        # Enable when PSRAM available
-        # Uncomment and adjust x positions:
-        # - label_main_title, label_main_artist, label_main_album, button_main_favorite
-        #   x: 130
-        # - button_main_shuffle x:
-        #   x: 186
-        ####
-        # - image:
-        #     id: album_art_image
-        #     x: 10
-        #     y: 2
-        #     src: album_art_online
+        - image:
+            id: album_art_img
+            src: album_art_placeholder
+            x: 10
+            y: 10
 
-        # x+130 if i ever get the damn image loader to run without crashing
         # Song Title
         - label:
             id: label_main_title
-            x: 10
-            y: 2
-            width: 300
+            x: 130
+            y: 7
+            width: 190
             height: 25
             text: "Connecting to WiFi..."
-            text_font: main_font
             long_mode: scroll_circular
 
         # Artist
         - label:
             id: label_main_artist
-            x: 10
+            x: 130
             y: 30
-            width: 300
+            width: 190
             height: 25
             text: "Please wait..."
-            text_font: main_font
 
         # Album
         - label:
             id: label_main_album
-            x: 10
+            x: 130
             y: 60
-            width: 300
+            width: 190
             height: 20
             text: " "
             text_font: small_font
@@ -1057,7 +1031,7 @@ lvgl:
         # Heart/Favorite
         - button:
             id: button_main_favorite
-            x: 10
+            x: 130
             y: 85
             width: 36
             height: 36
@@ -1099,7 +1073,7 @@ lvgl:
         # Shuffle
         - button:
             id: button_main_shuffle
-            x: 56
+            x: 176
             y: 85
             width: 36
             height: 36
@@ -1147,6 +1121,7 @@ lvgl:
             y: 140
             width: 300
             height: 20
+            text_font: small_font
             text: "00:00 / 00:00"
 
         - bar:
@@ -1338,7 +1313,6 @@ lvgl:
               - label:
                   id: label_volume_back
                   align: CENTER
-                  text_font: main_font
                   text: "Back to Player"
             on_click:
               - lvgl.page.show: main_page
