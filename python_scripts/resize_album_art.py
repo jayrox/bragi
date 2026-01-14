@@ -9,14 +9,24 @@ import time
 from datetime import datetime
 import struct
 
-# Get arguments
-url = sys.argv[1] if len(sys.argv) > 1 else ''
-media_artist = sys.argv[2] if len(sys.argv) > 2 else 'unknown'
-media_album = sys.argv[3] if len(sys.argv) > 3 else 'unknown'
-media_title = sys.argv[4] if len(sys.argv) > 4 else 'unknown'
+import argparse
+
+parser=argparse.ArgumentParser()
+
+parser.add_argument("--url", help="media image url")
+parser.add_argument("--artist", help="artist name")
+parser.add_argument("--album", help="album name")
+parser.add_argument("--title", help="media title")
+
+args=parser.parse_args()
+
+url = args.url
+media_artist = args.artist
+media_album = args.album
+media_title = args.title
 
 # Setup logging
-log_file = '/config/www/media/album_art/resize_debug.log'
+log_file = '/config/www/media/album_art/_resize_debug.log'
 
 def log(message):
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -30,6 +40,8 @@ log(f"URL: {url}")
 log(f"Artist: {media_artist}")
 log(f"Album: {media_album}")
 log(f"Title: {media_title}")
+log(len(sys.argv))
+log(sys.argv)
 
 try:
     # Create cache key from artist + album (or title if no album)
@@ -132,7 +144,7 @@ try:
             f.write(b''.join(pixels))
         
         rgb565_size = os.path.getsize(cache_file_rgb565)
-        log(f"Saved RGB565 (big-endian): {rgb565_size} bytes (should be 24200 bytes for 110x110)")
+        log(f"Saved RGB565: {rgb565_size} bytes (should be 24200 bytes for 110x110)")
         
         if rgb565_size != 24200:
             log(f"WARNING: RGB565 file size is incorrect! Expected 24200 bytes, got {rgb565_size}")
