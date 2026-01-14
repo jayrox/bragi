@@ -567,7 +567,8 @@ text_sensor:
 
             // Check if album is set, if not set it to empty space
             std::string album = id(media_album).state;
-            if (album.empty() || album == "unknown" || album == "unavailable" || album == "none") {
+            ESP_LOGD("main", "Album: '%s'", id(media_album).state.c_str());
+            if (!id(media_album).has_state() || album.empty() || album == "unknown" || album == "unavailable" || album == "none") {
               ESP_LOGD("main", "Album not set, setting to space");
               id(media_album).publish_state(" ");
             }
