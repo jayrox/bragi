@@ -3,6 +3,7 @@
 ----
 It does not play music on its own. Can display album art if you have a CYD that has PSRAM, uncomment the features in the config.yaml to enable.
 
+Pronounced: "BRAH-gee"
 
 
 ### Requires 3 Home Assistant Helpers:
