@@ -5,6 +5,8 @@ It does not play music on its own, just controls the currently playing media.
 
 Pronounced: "BRAH-gee"
 
+https://youtu.be/m4RGnzpfPXs
+
 
 ### Requires 3 Home Assistant Helpers:
 * input_text.current_album_cache_key
