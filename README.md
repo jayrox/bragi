@@ -5,6 +5,8 @@ It does not play music on its own, just controls the currently playing media.
 
 Pronounced: "BRAH-gee"
 
+![Bragi](bragi.png)
+
 https://youtu.be/m4RGnzpfPXs
 
 
