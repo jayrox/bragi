@@ -16,8 +16,6 @@ https://youtu.be/m4RGnzpfPXs
 * input_select.music_playlists
 
 ### Required edits:
-Sorry there are so many entity ids that need to be updated, it seems that not all functionality is provided under a single entity or device.
-
 * media_player_entity_mass: the Home Assistant media_player entity id provided by the Music Assistant integration
 * entity_button_favorite: the Home Assistant entity id for the media player's favorite button
 * \<media player id>: replace with the media_player entity id from Home Assistant
