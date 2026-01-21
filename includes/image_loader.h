@@ -2,6 +2,7 @@
 
 #include "esphome.h"
 #include <HTTPClient.h>
+#include <WiFiClient.h>
 
 // Simple image data holder
 static uint8_t *album_art_data = nullptr;
