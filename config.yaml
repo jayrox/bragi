@@ -540,6 +540,52 @@ text_sensor:
       then:
         - lambda: |-
             ESP_LOGD("main", "media_state: %s", x.c_str());
+            
+            // Check if anything is currently playing
+            bool nothing_playing = (x.empty() || x == "unavailable" || x == "unknown" || x == "idle" || x == "off");
+            
+            if (nothing_playing) {
+              ESP_LOGI("main", "Nothing playing - resetting UI");
+              id(is_playing) = false;
+              
+              // Reset all media info
+              id(media_title).publish_state("Nothing Playing");
+              id(media_artist).publish_state(" ");
+              id(media_album).publish_state(" ");
+              
+              // Reset progress
+              id(local_position) = 0;
+              id(last_ha_position) = 0;
+              
+              // Update UI elements
+              lv_label_set_text(id(label_main_title), "Nothing Playing");
+              lv_label_set_text(id(label_main_artist), " ");
+              lv_label_set_text(id(label_main_album), " ");
+              lv_label_set_text(id(label_main_progress), "00:00 / 00:00");
+              lv_bar_set_value(id(progress_bar), 0, LV_ANIM_OFF);
+              
+              // Load bragi_dark.rgb565 image
+              std::string base_url = id(ha_url_setting).state;
+              std::string bragi_url = base_url + "/local/media/album_art/bragi_dark.rgb565";
+              
+              if (image_loader.load_image(bragi_url, "bragi_dark")) {
+                static lv_img_dsc_t img_dsc;
+                img_dsc.header.always_zero = 0;
+                img_dsc.header.cf = LV_IMG_CF_TRUE_COLOR_CHROMA_KEYED;
+                img_dsc.header.w = 110;
+                img_dsc.header.h = 110;
+                img_dsc.data_size = 24200;
+                img_dsc.data = image_loader.get_data();
+                
+                lv_img_set_src(id(album_art_img), &img_dsc);
+              } else {
+                // Fallback to placeholder if bragi_dark doesn't load
+                lv_img_set_src(id(album_art_img), id(album_art_placeholder));
+              }
+              
+              return;
+            }
+            
         - lvgl.label.update:
             id: label_main_play_pause
             text: !lambda |-
